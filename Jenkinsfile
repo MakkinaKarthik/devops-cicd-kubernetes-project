@@ -65,6 +65,18 @@ pipeline {
                 }
             }
         }
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                    kubectl set image deployment/devops-demo \
+                    devops-demo=${DOCKER_IMAGE}:${BUILD_NUMBER} \
+                    -n devops-demo
+
+                    kubectl rollout status deployment/devops-demo \
+                    -n devops-demo
+                '''
+            }
+        }
 
         stage('Show Build Information') {
             steps {
