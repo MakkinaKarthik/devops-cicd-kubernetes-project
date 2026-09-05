@@ -2,18 +2,27 @@ pipeline {
 
     agent any
 
+    environment {
+        DOCKER_IMAGE = "makkinakarthik/devops-demo-app"
+    }
+
     stages {
 
         stage('Checkout') {
             steps {
+                echo 'Checking out source code...'
                 checkout scm
             }
         }
 
         stage('Test') {
             steps {
+                echo 'Running application tests...'
+
                 sh '''
-                    python3 -m pip install -r app/requirements.txt
+                    python3 -m venv jenkins-venv
+                    . jenkins-venv/bin/activate
+                    pip install -r app/requirements.txt
                     pytest app/test_app.py
                 '''
             }
@@ -21,37 +30,59 @@ pipeline {
 
         stage('Build Docker Image') {
             steps {
+                echo "Building Docker image..."
+
                 sh '''
-                    docker build -t makkinakarthik/devops-demo-app:${BUILD_NUMBER} .
+                    docker build \
+                    -t ${DOCKER_IMAGE}:${BUILD_NUMBER} \
+                    -t ${DOCKER_IMAGE}:latest \
+                    .
                 '''
             }
         }
 
-        stage('Push Docker Image') {
+        stage('Docker Login and Push') {
             steps {
-                sh '''
-                    docker push makkinakarthik/devops-demo-app:${BUILD_NUMBER}
-                '''
+
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )
+                ]) {
+
+                    sh '''
+                        echo "$DOCKER_PASSWORD" | docker login \
+                        -u "$DOCKER_USERNAME" \
+                        --password-stdin
+
+                        docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
+                        docker push ${DOCKER_IMAGE}:latest
+
+                        docker logout
+                    '''
+                }
             }
         }
 
-        stage('Deploy to Kubernetes') {
+        stage('Show Build Information') {
             steps {
-                sh '''
-                    kubectl set image deployment/devops-demo \
-                    devops-demo=makkinakarthik/devops-demo-app:${BUILD_NUMBER} \
-                    -n devops-demo
-                '''
+                echo "===================================="
+                echo "Jenkins Build Number: ${BUILD_NUMBER}"
+                echo "Docker Image: ${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                echo "===================================="
             }
         }
+    }
 
-        stage('Verify Deployment') {
-            steps {
-                sh '''
-                    kubectl rollout status deployment/devops-demo \
-                    -n devops-demo
-                '''
-            }
+    post {
+        success {
+            echo 'CI pipeline completed successfully!'
+        }
+
+        failure {
+            echo 'Pipeline failed. Check the stage logs.'
         }
     }
 }
